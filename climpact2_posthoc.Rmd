@@ -1,0 +1,275 @@
+---
+title: 'Liberia GCF: Analysis of climpact2 model results'
+author: "Ruan de Wet"
+date: "03/05/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=F, warning=F, comment=F)
+```
+
+```{r Load libraries}
+
+library(dplyr)
+library(tidyr)
+library(readr)
+library(stringr)
+library(feather)
+
+library(ggplot2)
+library(plotly)
+
+ rm(list = ls())
+
+today = Sys.Date() %>%
+  format("%y%m%d_")
+
+```
+
+
+## Overview
+
+The climpact2 package runs an analysis of temperature and precipitation timeseries for a single point/weather station. This would be fine, except that it runs a single model/RCP at a time. So we have to repeat the analysis multiple times in order to get a sense of the variability in the model simulations under different RCPs. 
+
+The objective of this analysis to take the results from the multiples climpact analyses, wrangle them into a single, usable dataframe and to then visualise the indices that we're interested in. Details of the indices can be found [here](https://climpact-sci.org/indices/).
+
+To explore what this could look like, we're trying the analysis out on the Liberia GCF project data. The baseline period used for this analysis was 1951 to 1985. The candidate indices for this location are as follows:
+
+Temperature
+- su. Annual number of days when TX > 25 degrees_C
+- txx. Annual warmest daily TX
+- txn. Annual coldest daily TX
+- dtr. Mean annual difference between daily TX and daily TN
+- wsdi. Annual number of days contributing to events where 6 or more consecutive days experience TX > 90th percentile
+- tx90p. Annual percentage of days when TX > 90th percentile
+- txge30. Annual number of days when TX >= 30 degrees_C
+
+- HWM−EHF. Heatwave Magnitude (mean temperature of all heatwave events)
+- HWA−EHF. Heatwave Amplitude (peak temperature of the hottest heatwave event)
+- HWN−EHF. Heatwave Number (number of discreet heatwave events)
+- HWD−EHF. Heatwave Duration (length of longest heatwave event)
+- HWF−EHF. Heatwave Frequency (number of days contributing to heatwave events)
+
+Precipitation
+- cdd. Maximum annual number of consecutive dry days (when precipitation < 1.0 mm)
+- cwd. Maximum annual number of consecutive wet days (when precipitation >= 1.0 mm)
+- r10mm. Annual number of days when precipitation >= 10 mm
+- r20mm. Annual number of days when precipitation >= 20 mm
+- rx1day. Maximum annual 1−day precipitation total
+- rx5day. Maximum annual 5−day precipitation total
+- prcptot. Annual sum of daily precipitation >= 1.0 mm
+- sdii. Annual total precipitation divided by the number of wet days (when total precipitation >= 1.0 mm)
+
+- r95p. Annual sum of daily precipitation > 95th percentile
+- r99p. Annual sum of daily precipitation > 99th percentile
+
+As a start, we will only assess the 25th, 50th and 75th percentile models under RCP 4.5 and 8.5. This should ideally be scalable to all the options available. 
+
+## Import the things
+
+### Indices
+
+There are approx. 100 indices stored on file per climpact analysis. We aren't interested in the majority of these. The list below is my top 20 selection to make this all a bit more managable.
+
+04/05/2020: Dave has asked for a subset of the possible indices of interest. So not all listed above are included below.
+
+```{r Define Indices of Interest}
+
+ioi_header = c("dtr_Mean annual difference between daily TX and daily TN",
+        "wsdi_Annual number of days contributing to events where 6 or more consecutive days experience TX > 90th percentile",
+        
+        "txge30_Annual number of days when TX >= 30 degrees_C",
+        "HWM−EHF_Heatwave Magnitude (mean temperature of all heatwave events)",
+        
+        "HWN−EHF_Heatwave Number (number of discreet heatwave events)",
+        "HWD−EHF_Heatwave Duration (length of longest heatwave event)",
+       
+       
+        "cwd_Maximum annual number of consecutive wet days (when precipitation >= 1.0 mm)",
+        "r10mm_Annual number of days when precipitation >= 10 mm",
+        "r20mm_Annual number of days when precipitation >= 20 mm",
+        
+        "rx5day_Maximum annual 5−day precipitation total",
+        
+        "sdii_Annual total precipitation divided by the number of wet days (when total precipitation >= 1.0 mm)",
+        "r95p_Annual sum of daily precipitation > 95th percentile",
+        "r99p_Annual sum of daily precipitation > 99th percentile")
+
+df_ioi = tibble(header = ioi_header) %>%
+  separate(header, into = c("ioi", "description"), sep = "_") %>%
+  mutate(index = paste0(ioi, "_ANN"))
+
+df_heatwave = tibble(ioi = "ehf_heatwave", description = "Heatwave combined indices", index = "ehf_heatwave_ANN")
+
+```
+
+The model results are stored as a series of CSVs within a folder per analysis run. The folder/file names contain important information about the contents. Metadata dataframe is also defined below by extracting the relevant information. 
+
+```{r ID the file paths}
+
+dsn_indices = "G:/Ruan/R/climpact2-master/model_inputs/Monrovia/indices"
+dsn_trend = "G:/Ruan/R/climpact2-master/model_inputs/Monrovia/trend"
+
+# Define folder paths
+path_folders = list.files(dsn_indices,
+                          pattern = "Monrovia",
+                          all.files = T, full.names = T) 
+
+# Extract metadata from the folder names
+meta_folders = path_folders %>%
+  str_extract("(?<=Monrovia ).+") %>%
+  tibble() %>%
+  separate(".", into = c("RCP", "Percentile", "Xtra", "Model"), sep = "_") %>%
+  mutate(Percentile = str_sub(Percentile, 1L, 4L),
+         Path = path_folders)
+meta_folders$seq = 1:nrow(meta_folders)
+
+# Define file paths within each folder
+df_filepaths = tibble(index = df_ioi$index, path = NA, seq = NA)
+
+for(i in 1:nrow(meta_folders)) {
+path_files = list.files(meta_folders$Path[[i]],
+                        pattern = "Monrovia",
+                        all.files = T, full.names = T) 
+
+temp_filepaths = path_files %>%
+  str_extract(paste0("(?<=", meta_folders$Model[[i]],"_).+")) %>%
+  str_extract(".+(?=.csv)") %>%
+  tibble() %>%
+  rename(index = ".") %>%
+  mutate(path = path_files,
+         seq = i) 
+
+temp_ioi_filepaths = temp_filepaths %>%
+  filter(index %in% df_ioi$index) 
+temp_heatwave_filepaths = temp_filepaths %>%
+  filter(index %in% df_heatwave$index) 
+
+df_filepaths = rbind.data.frame(df_filepaths, temp_ioi_filepaths, temp_heatwave_filepaths)
+
+}
+
+df_filepaths_ioi = df_filepaths %>%
+  filter(!is.na(path),
+         index != "ehf_heatwave_ANN") %>%
+  left_join(df_ioi, by = "index")
+
+df_filepaths_heatwave = df_filepaths %>%
+  filter(!is.na(path),
+         index == "ehf_heatwave_ANN")
+
+
+```
+
+Now we're reading in the data from the paths that we've defined above. Each CSV has some metadata info in the first 6 rows. We've already extracted the necessary metadata, so for this analysis we will simply exclude this additional info. There is also a column in each CSV with the normalised index values. This may come in handy down the road, but for now I'm excluding it as my primary objective is plotting the actual data.
+
+```{r Read in and process IOI, eval = F}
+
+df_ioi_labelled = tibble(time = NA, value = NA, index = NA, seq = NA)
+
+for(i in 1:nrow(df_filepaths)){
+temp_ioi = read_csv(df_filepaths$path[[i]], skip = 6) %>%
+  dplyr::select(1:2) %>%
+  mutate(index = df_filepaths$index[[i]],
+         seq = df_filepaths$seq[[i]])
+names(temp_ioi) = names(df_ioi_labelled)
+df_ioi_labelled = rbind.data.frame(df_ioi_labelled, temp_ioi)
+}
+
+df_ioi_labelled = df_ioi_labelled %>%
+  filter(!is.na(seq))
+
+df_ioi_labelled = meta_folders %>%
+  dplyr::select(-Path, -Xtra) %>%
+  left_join(df_ioi_labelled, by = "seq") %>%
+  left_join(df_ioi, by = "index")
+
+```
+
+As the data are fairly large (currently 13,500 rows) and I'm planning on tripling the number of models to include, I'm going to save the data frame as a feather file. Slower writing, but fast reading. 
+
+```{r Write and read labelled data}
+
+# write_feather(df_ioi_labelled, "data/LiberiaGCF_3models10indices2rcps_1951-2100.feather")
+
+df_ioi_labelled = read_feather("data/LiberiaGCF_3models10indices2rcps_1951-2100.feather")
+
+```
+
+### Trend analysis results
+
+```{r ID the trend file paths}
+
+dsn_trend = "G:/Ruan/R/climpact2-master/model_inputs/Monrovia/trend"
+
+# Define folder paths
+path_folders = list.files(dsn_trend,
+                          pattern = "Monrovia",
+                          all.files = T, full.names = T) 
+
+# Extract metadata from the folder names
+meta_folders = path_folders %>%
+  str_extract("(?<=Monrovia ).+") %>%
+  tibble() %>%
+  separate(".", into = c("RCP", "Percentile", "Xtra", "Model"), sep = "_") %>%
+  mutate(Percentile = str_sub(Percentile, 1L, 4L),
+         Path = path_folders)
+meta_folders$seq = 1:nrow(meta_folders)
+
+# Define file paths within each folder
+df_filepaths = tibble(index = "trend", path = NA, seq = NA)
+
+for(i in 1:nrow(meta_folders)) {
+path_files = list.files(meta_folders$Path[[i]],
+                        pattern = "trend.csv",
+                        all.files = T, full.names = T) 
+
+temp_filepaths = path_files %>%
+  str_extract(paste0("(?<=", meta_folders$Model[[i]],"_).+")) %>%
+  str_extract(".+(?=.csv)") %>%
+  tibble() %>%
+  rename(index = ".") %>%
+  mutate(path = path_files,
+         seq = i) 
+
+df_filepaths = rbind.data.frame(df_filepaths, temp_filepaths)
+}
+
+df_filepaths = df_filepaths %>%
+  filter(!is.na(path)) 
+
+```
+
+
+## Plot the things
+
+Now that we have a processed, labelled dataset with all the relevant data that we want, we can start plotting. 
+
+We will want a different plot for each index, with time on the x, index value on the y, the three models distinguished by shape and the RCPs distinguished by colour. It would also be good to have a geom_smooth for the RCPs but taking the models as one.
+
+```{r Save plots}
+
+df_meta = df_filepaths %>% dplyr::select(ioi, index, description) %>% unique()
+
+for(i in 1:nrow(df_meta)){
+plot_index = df_ioi_labelled %>%
+  filter(index == df_meta$index[[i]]) %>%
+  mutate(Percentile = factor(Percentile, levels = c("75th", "50th", "25th"))) %>%
+  ggplot(aes(x = time, y = value, col = Percentile, fill = Percentile)) +
+  geom_vline(xintercept = 1985, linetype = 2, col = "grey") +
+  geom_smooth(method = "lm") +
+  # geom_point() +
+  geom_line() +
+  labs(y = paste(df_meta$ioi[[i]], df_meta$description[[i]], sep = ": "),
+       x = "Year") +
+  facet_grid(RCP~.) +
+  theme_bw()
+
+ggsave(plot_index, filename = paste0("figures/", today, "LiberiaGCF_", df_meta$ioi[[i]], "_vert.png"), width = 15, height = 9)
+}
+
+
+```
+
+
