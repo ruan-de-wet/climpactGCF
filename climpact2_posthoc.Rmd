@@ -2,7 +2,12 @@
 title: 'Liberia GCF: Analysis of climpact2 model results'
 author: "Ruan de Wet"
 date: "03/05/2020"
-output: html_document
+output:
+  html_document:
+    fig_width: 10
+    fig_height: 6
+    toc: true
+    toc_depth: 2
 ---
 
 ```{r setup, include=FALSE}
@@ -16,9 +21,7 @@ library(tidyr)
 library(readr)
 library(stringr)
 library(feather)
-
 library(ggplot2)
-library(plotly)
 
  rm(list = ls())
 
@@ -28,15 +31,16 @@ today = Sys.Date() %>%
 ```
 
 
-## Overview
+# Overview
 
-The climpact2 package runs an analysis of temperature and precipitation timeseries for a single point/weather station. This would be fine, except that it runs a single model/RCP at a time. So we have to repeat the analysis multiple times in order to get a sense of the variability in the model simulations under different RCPs. 
+The [climpact2 package](https://github.com/ARCCSS-extremes/climpact2) runs an analysis of temperature and precipitation timeseries for a single point/weather station. This would be fine, except that it runs a single model/RCP at a time. So we have to repeat the analysis multiple times in order to get a sense of the variability in the model simulations under different RCPs. 
 
 The objective of this analysis to take the results from the multiples climpact analyses, wrangle them into a single, usable dataframe and to then visualise the indices that we're interested in. Details of the indices can be found [here](https://climpact-sci.org/indices/).
 
 To explore what this could look like, we're trying the analysis out on the Liberia GCF project data. The baseline period used for this analysis was 1951 to 1985. The candidate indices for this location are as follows:
 
-Temperature
+**Temperature**
+
 - su. Annual number of days when TX > 25 degrees_C
 - txx. Annual warmest daily TX
 - txn. Annual coldest daily TX
@@ -51,7 +55,8 @@ Temperature
 - HWD−EHF. Heatwave Duration (length of longest heatwave event)
 - HWF−EHF. Heatwave Frequency (number of days contributing to heatwave events)
 
-Precipitation
+**Precipitation**
+
 - cdd. Maximum annual number of consecutive dry days (when precipitation < 1.0 mm)
 - cwd. Maximum annual number of consecutive wet days (when precipitation >= 1.0 mm)
 - r10mm. Annual number of days when precipitation >= 10 mm
@@ -66,13 +71,13 @@ Precipitation
 
 As a start, we will only assess the 25th, 50th and 75th percentile models under RCP 4.5 and 8.5. This should ideally be scalable to all the options available. 
 
-## Import the things
+# Import the things
 
-### Indices
+## Indices
 
 There are approx. 100 indices stored on file per climpact analysis. We aren't interested in the majority of these. The list below is my top 20 selection to make this all a bit more managable.
 
-04/05/2020: Dave has asked for a subset of the possible indices of interest. So not all listed above are included below.
+*04/05/2020: Dave has asked for a subset of the possible indices of interest. So not all listed above are included below.*
 
 The heatwave indices (HW*-EHF) are not provided as individual indices but combined into a single csv labelled "ehf_heatwave". This will have to be dealt with seperately as it has a different structure.
 
@@ -229,7 +234,7 @@ df_ioi_labelled = read_feather("data/LiberiaGCF_3models13indices2rcps_1951-2100.
 
 ```
 
-### Trend analysis results
+## Trend stats
 
 ```{r ID the trend file paths}
 
@@ -307,7 +312,7 @@ df_stats_labelled = read_csv("data/LiberiaGCF_3models13indices2rcps_1951-2100_st
 ```
 
 
-## Plot the things
+# Plot the things
 
 Now that we have a processed, labelled dataset with all the relevant data that we want, we can start plotting. 
 
@@ -327,7 +332,6 @@ df_ioi_labelled = df_ioi_labelled %>%
   mutate(Percentile = factor(Percentile, levels = c("75th", "50th", "25th")))
 
 for(i in 1:nrow(df_meta)){
-# for(i in 1:2){
 df_plot = df_ioi_labelled %>%
   filter(index == df_meta$index[[i]]) 
 
@@ -341,9 +345,9 @@ plot_index = df_plot %>%
   ggplot(aes(x = time, y = value, col = Percentile, fill = Percentile)) +
   geom_vline(xintercept = 1985, linetype = "dotted", col = "grey") +
   geom_smooth(method = "lm") +
-  geom_text(data = df_plot_stats, x = 1951, y = max(df_plot$value, na.rm = T)*1.05, col = "black", fill = "black", hjust = "left",
+  geom_text(data = df_plot_stats, x = 1951, y = max(df_plot$value, na.rm = T)*1.05, col = "black", hjust = "left",
             aes(label = paste0("Median slope = ", Slope*10, " / decade\np-value = ", P_Value))) +
-  geom_text(data = df_plot_stats, x = 2100, y = min(df_plot$value, na.rm = T)*0.9, col = "darkgrey", fill = "darkgrey", hjust = "right",
+  geom_text(data = df_plot_stats, x = 2100, y = min(df_plot$value, na.rm = T)*0.9, col = "darkgrey", hjust = "right",
             aes(label = paste0("Median model: ", Model))) +
   geom_line() +
   geom_point(shape = 21, fill = "white") +
@@ -354,7 +358,8 @@ plot_index = df_plot %>%
   scale_y_continuous(limits=c(min(df_plot$value, na.rm = T) * 0.9, max(df_plot$value, na.rm = T) * 1.1)) +
   theme_bw()
 
-ggsave(plot_index, filename = paste0("figures/", today, "LiberiaGCF_", df_meta$ioi[[i]], ".png"), width = 10, height = 6)
+# ggsave(plot_index, filename = paste0("figures/", today, "LiberiaGCF_", df_meta$ioi[[i]], ".png"), width = 10, height = 6)
+  print(plot_index)
 }
 
 
